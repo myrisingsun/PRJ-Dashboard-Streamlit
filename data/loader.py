@@ -66,6 +66,34 @@ def _non_empty_rows(data: list[list[str]], start: int) -> list[list[str]]:
     return [r for r in data[start:] if r and r[0].strip()]
 
 
+_MONTH_MAP_RU = {
+    "янв": 1, "фев": 2, "мар": 3, "апр": 4,
+    "май": 5, "июн": 6, "июл": 7, "авг": 8,
+    "сен": 9, "окт": 10, "ноя": 11, "дек": 12,
+}
+
+
+def _parse_month_label(label: str) -> Optional[pd.Timestamp]:
+    """Convert a column label like '2026_Янв' → pd.Timestamp('2026-01-01').
+
+    Returns None if the label cannot be parsed.
+    """
+    if not label or label.startswith("col_"):
+        return None
+    parts = label.split("_", 1)
+    if len(parts) != 2:
+        return None
+    year_str, month_str = parts
+    try:
+        year = int(year_str)
+    except ValueError:
+        return None
+    month_num = _MONTH_MAP_RU.get(month_str.lower())
+    if month_num is None:
+        return None
+    return pd.Timestamp(year=year, month=month_num, day=1)
+
+
 @st.cache_data(ttl=300)
 def load_prj_list() -> pd.DataFrame:
     """
@@ -114,41 +142,53 @@ def load_prj_status() -> pd.DataFrame:
     """
     Sheet 03.PRJ_STATUS
     Rows 0-2: multi-level header (year / quarter / month).
-    Row 3+: project rows, two rows per project (Plan / Fact).
+    Row 3+: data rows, two rows per key work per project (Plan / Fact).
 
     Columns layout (0-indexed):
-      0  – Код проекта
-      1  – Название проекта
-      2  – (reserved / merge)
-      3  – (reserved)
-      4  – План\Факт  ('План' or 'Факт')
-      5  – Название ключевой точки
-      6  – Срок (e.g. "Q1 2025 - Q4 2026")
-      7+ – monthly milestone flags (1 = done)
+      0  – №  (row number, may be empty for Fact rows)
+      1  – Код проекта  (forward-filled from Plan row)
+      2  – Название работы  (each row has its own value — NOT forward-filled)
+      3  – col3  (reserved)
+      4  – Тип  ('План' or 'Факт')
+      5  – Доп. описание  (clarified name / sub-description)
+      6  – Срок  (e.g. "Q1 2025 - Q4 2026")
+      7+ – monthly milestone flags ('1' = executed, 'X' = key milestone)
     """
     data = _load_raw("03.PRJ_STATUS")
     if len(data) < 5:
         return pd.DataFrame()
 
-    # Build month column labels from rows 0-2
-    year_row   = data[0]
-    # quarter_row = data[1]  # not used for column naming
-    month_row  = data[2]
+    # Sheet structure: row 0 = year, row 1 = quarter (unused), row 2 = month
+    year_row  = data[0]
+    month_row = data[2]
 
     # Fixed columns before monthly data
-    fixed_cols = ["Код проекта", "Название", "col2", "col3", "Тип", "Ключевая точка", "Срок"]
+    fixed_cols = ["№", "Код проекта", "Название работы", "col3", "Тип", "Доп. описание", "Срок"]
+    n_fixed = len(fixed_cols)
+
+    # Build month column labels.
+    # Year cells are merged in the sheet, so gspread returns the value only in the
+    # first cell of each year group — all others are empty. Forward-fill current_year
+    # so every monthly column gets a proper "YYYY_Месяц" label.
+    # Columns with an empty month cell are visual separators — skip them entirely.
     month_cols = []
-    for i in range(len(fixed_cols), len(month_row)):
-        year  = year_row[i].strip()  if i < len(year_row)  else ""
+    current_year = ""
+    for i in range(n_fixed, max(len(year_row), len(month_row))):
+        y = year_row[i].strip() if i < len(year_row) else ""
+        if y:
+            current_year = y
         month = month_row[i].strip() if i < len(month_row) else ""
-        label = f"{year}_{month}" if year and month else f"col_{i}"
+        if not month:
+            continue  # separator column — skip
+        label = f"{current_year}_{month}" if current_year else f"col_{i}"
         month_cols.append(label)
 
     all_cols = fixed_cols + month_cols
 
     rows = []
     for row in data[3:]:
-        if not row or not row[0].strip():
+        # Skip completely empty rows (e.g. spacer rows between projects)
+        if not row or not any(c.strip() for c in row):
             continue
         padded = row + [""] * (len(all_cols) - len(row))
         rows.append(padded[: len(all_cols)])
@@ -156,9 +196,12 @@ def load_prj_status() -> pd.DataFrame:
     df = pd.DataFrame(rows, columns=all_cols)
     df = _strip_df(df)
 
-    # Forward-fill Код проекта / Название (merged cells appear only in Plan row)
+    # Forward-fill Код проекта only (merged cells appear only in Plan row)
+    # "Название работы" (col 2) is NOT forward-filled — each row has its own value
     df["Код проекта"] = df["Код проекта"].replace("", None).ffill()
-    df["Название"]    = df["Название"].replace("", None).ffill()
+
+    # Drop rows where Код проекта is still empty (truly empty header/spacer rows)
+    df = df[df["Код проекта"].notna() & (df["Код проекта"] != "")]
 
     return df
 

@@ -15,9 +15,11 @@ render_sidebar_user(authenticator)
 st.title("🔍 Диагностика сырых данных")
 
 sheet = st.selectbox("Лист", [
-    "05.PRJ_MONEY_2026",
     "01.PRJ_LIST",
+    "02.OPER_LIST",
+    "03.PRJ_STATUS",
     "04.PRJ_TEAM",
+    "05.PRJ_MONEY_2026",
 ])
 
 with st.spinner("Загрузка..."):
