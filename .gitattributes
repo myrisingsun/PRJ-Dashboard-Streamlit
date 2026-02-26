@@ -1,0 +1,7 @@
+# Normalize line endings to LF for all text files (project deploys on Linux)
+* text=auto eol=lf
+
+# Explicitly binary — no conversion
+*.png binary
+*.jpg binary
+*.ico binary

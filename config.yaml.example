@@ -1,0 +1,14 @@
+credentials:
+  usernames:
+    admin:
+      name: Администратор
+      password: "$2b$12$REPLACE_WITH_BCRYPT_HASH"
+      # Generate hash: python -c "import bcrypt; print(bcrypt.hashpw('YOUR_PASSWORD'.encode(), bcrypt.gensalt(12)).decode())"
+    yourlogin:
+      name: Имя Пользователя
+      password: "$2b$12$REPLACE_WITH_BCRYPT_HASH"
+
+cookie:
+  expiry_days: 7
+  key: REPLACE_WITH_RANDOM_SECRET_KEY   # любая длинная случайная строка
+  name: afi_dashboard

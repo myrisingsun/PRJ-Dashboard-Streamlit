@@ -1,0 +1,11 @@
+version: "3.9"
+services:
+  dashboard:
+    build: .
+    restart: always
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env                               # GOOGLE_SHEET_ID + GCP_SERVICE_ACCOUNT_JSON
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro  # user credentials — not baked into image
