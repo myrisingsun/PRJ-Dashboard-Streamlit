@@ -372,63 +372,75 @@ def get_finance_per_project() -> pd.DataFrame:
 @st.cache_data(ttl=300)
 def load_prj_money() -> pd.DataFrame:
     """
-    Sheet 05.PRJ_MONEY_2026
-    Complex structure: rows grouped by IT product.
-    Header layout (rows 0-2 are multi-level):
-      Col 0: IT-product / position name
-      Col 1: Бюджет 2026
-      Col 2-25: Plan / Fact for Jan–Dec (12 months × 2 = 24)
-      Col 26-29: Итог plan, Итог fact, Отклонение, Не оплачено
-    Data rows: product header, position rows, Итого row per group.
+    Sheet 05.PRJ_MONEY_2026 — actual column layout (0-indexed):
+      0  – Код проекта (present only in first row of each project; forward-filled)
+      1  – Статья (ФОТ, Лицензии, «Итого помесячно», etc.)
+      5  – Бюджет_2026
+      7–30 – Янв_план, Янв_факт, Фев_план, Фев_факт … Дек_план, Дек_факт (24 cols)
+      32 – План_оплат
+      33 – Факт_оплат
+      34 – Отклонение
+      35 – Не_оплачено
+    Rows 0-2 are multi-level header — skipped.
+    Adds boolean column `is_итого` (True when col 1 contains «итого»).
+    Rows without a valid project code are skipped.
     """
     data = _load_raw("05.PRJ_MONEY_2026")
-    if len(data) < 5:
+    if len(data) < 4:
         return pd.DataFrame()
 
-    # Build column names from rows 0-2
     month_names = [
         "Янв", "Фев", "Мар", "Апр", "Май", "Июн",
         "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек",
     ]
-    fixed = ["Позиция", "Бюджет_2026"]
     month_cols = []
     for m in month_names:
         month_cols += [f"{m}_план", f"{m}_факт"]
-    summary = ["План_оплат", "Факт_оплат", "Отклонение", "Не_оплачено"]
-    all_cols = fixed + month_cols + summary
 
     rows = []
-    current_product = ""
-    for row in data[3:]:
-        if not row or not any(c.strip() for c in row):
+    current_code = ""
+    for raw_row in data[3:]:
+        if not raw_row or not any(c.strip() for c in raw_row):
             continue
-        padded = row + [""] * (len(all_cols) - len(row))
-        padded = padded[: len(all_cols)]
+        # Pad to at least 36 columns so index access is safe
+        row = raw_row + [""] * max(0, 36 - len(raw_row))
 
-        pos_name = padded[0].strip()
-        if not pos_name:
-            continue
+        c0 = row[0].strip()
+        c1 = row[1].strip()
 
-        # Detect product header: no numeric data and not "Итого"
-        # Heuristic: budget cell is empty → it's a product header row
-        if not padded[1].strip() and "итого" not in pos_name.lower():
-            current_product = pos_name
-            continue
+        # Forward-fill project code
+        if c0 and _PRJ_CODE_RE.match(c0):
+            current_code = c0
 
-        record = {"IT_продукт": current_product, **dict(zip(all_cols, padded))}
+        if not current_code:
+            continue  # skip header rows before the first project block
+
+        if not c1:
+            continue  # skip rows with no статья name
+
+        record: dict = {
+            "Код проекта": current_code,
+            "Статья":      c1,
+            "Бюджет_2026": _parse_rub(row[5]),
+        }
+
+        # Monthly plan/fact pairs: cols 7–30 (24 columns)
+        for i, col_name in enumerate(month_cols):
+            col_idx = 7 + i
+            record[col_name] = _parse_rub(row[col_idx] if col_idx < len(row) else "")
+
+        record["План_оплат"]  = _parse_rub(row[32] if len(row) > 32 else "")
+        record["Факт_оплат"]  = _parse_rub(row[33] if len(row) > 33 else "")
+        record["Отклонение"]  = _parse_rub(row[34] if len(row) > 34 else "")
+        record["Не_оплачено"] = _parse_rub(row[35] if len(row) > 35 else "")
+        record["is_итого"]    = "итого" in c1.lower()
+
         rows.append(record)
 
-    df = pd.DataFrame(rows)
-    df = _strip_df(df)
+    if not rows:
+        return pd.DataFrame()
 
-    # Convert numeric-looking columns
-    numeric_cols = [c for c in df.columns if c not in ("IT_продукт", "Позиция")]
-    for col in numeric_cols:
-        df[col] = pd.to_numeric(
-            df[col].str.replace(" ", "").str.replace(",", ".").str.replace("\xa0", ""),
-            errors="coerce",
-        )
-    return df
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -437,34 +449,29 @@ def load_prj_money() -> pd.DataFrame:
 
 def get_prj_summary() -> pd.DataFrame:
     """
-    Merge PRJ_LIST + PRJ_MONEY for the Index page KPI table.
+    Merge PRJ_LIST + finance totals for a summary table.
     Returns one row per project with budget/fact/remaining columns.
+    Uses get_finance_per_project() which reads correct column indices.
     """
     prj = load_prj_list()
     if prj.empty:
         return pd.DataFrame()
 
-    money = load_prj_money()
+    code_col   = _find_col(prj, ["Код проекта", "Код", "CODE"])
+    name_col   = _find_col(prj, ["Сокращенное название проекта", "Название", "Сокращённое название"])
+    status_col = _find_col(prj, ["Текущий статус", "Статус"])
+    period_col = _find_col(prj, ["Плановый срок", "Срок"])
+    bitrix_col = _find_col(prj, ["Ссылка на приказ в Bitrix24 (PDF)", "Bitrix24", "Bitrix"])
+    prod_col   = _find_col(prj, ["Ссылка на систему PROD", "PROD", "Prod"])
 
-    # Try to find the canonical column names (they may vary by actual sheet)
-    code_col    = _find_col(prj, ["Код проекта", "Код", "CODE"])
-    name_col    = _find_col(prj, ["Сокращенное название проекта", "Название", "Сокращённое название"])
-    status_col  = _find_col(prj, ["Текущий статус", "Статус"])
-    period_col  = _find_col(prj, ["Плановый срок", "Срок"])
-    bitrix_col  = _find_col(prj, ["Ссылка на приказ в Bitrix24 (PDF)", "Bitrix24", "Bitrix"])
-    prod_col    = _find_col(prj, ["Ссылка на систему PROD", "PROD", "Prod"])
+    keep = [c for c in [code_col, name_col, status_col, period_col, bitrix_col, prod_col] if c]
+    result = prj[keep].copy()
+    result.columns = ["Код", "Название", "Статус", "Срок", "Bitrix", "PROD"][: len(result.columns)]
 
-    result = prj[[c for c in [code_col, name_col, status_col, period_col, bitrix_col, prod_col] if c]].copy()
-    result.columns = [
-        c for c in ["Код", "Название", "Статус", "Срок", "Bitrix", "PROD"]
-        if True  # keep same length
-    ][: len(result.columns)]
-
-    if not money.empty and "Факт_оплат" in money.columns and "Бюджет_2026" in money.columns:
-        fin = money.groupby("IT_продукт")[["Бюджет_2026", "Факт_оплат"]].sum().reset_index()
-        fin.columns = ["Код", "Бюджет", "Факт"]
+    fin = get_finance_per_project()
+    if not fin.empty:
         result = result.merge(fin, on="Код", how="left")
-        result["Осталось"] = result["Бюджет"] - result["Факт"]
+        result["Осталось"] = result["Бюджет"] - result["Факт_оплат"]
 
     return result
 
