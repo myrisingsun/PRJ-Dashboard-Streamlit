@@ -188,6 +188,8 @@ div[data-testid="stHorizontalBlock"] div[data-testid="stMarkdownContainer"] > * 
     font-weight: 500;
 }
 .prj-link:hover { background: #dce3e8; }
+.prj-name-link { text-decoration: none; color: inherit; }
+.prj-name-link:hover .prj-name { color: #2980b9; text-decoration: underline; }
 .prj-launched {
     font-size: 0.68em;
     padding: 2px 8px;
@@ -475,7 +477,7 @@ def project_card(row: pd.Series) -> str:
       <span class="prj-badge" style="background:{color}">{emoji} {status}</span>
     </div>
   </div>
-  <div class="prj-name">{name}</div>
+  <a class="prj-name-link" href="/Project?project={code}"><div class="prj-name">{name}</div></a>
   {meta_html}
   {desc_html}
   {finance_html}
