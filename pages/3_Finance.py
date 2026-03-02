@@ -145,18 +145,24 @@ def make_portfolio_chart(fin_df: pd.DataFrame) -> go.Figure | None:
         f"{r['Код']} — {code_to_name[r['Код']]}" if r["Код"] in code_to_name else r["Код"]
         for _, r in df.iterrows()
     ]
+    def _m(vals):
+        return [f"{v:.1f}" if v > 0 else "" for v in vals]
+
     fig = go.Figure()
     fig.add_trace(go.Bar(
         name="Бюджет", y=labels, x=df["Бюджет"] / 1e6,
         orientation="h", marker_color="#3498DB", opacity=0.55,
+        text=_m(df["Бюджет"] / 1e6), textposition="outside", cliponaxis=False,
     ))
     fig.add_trace(go.Bar(
         name="План оплат", y=labels, x=df["План_оплат"] / 1e6,
         orientation="h", marker_color="#9B59B6", opacity=0.75,
+        text=_m(df["План_оплат"] / 1e6), textposition="outside", cliponaxis=False,
     ))
     fig.add_trace(go.Bar(
         name="Факт оплат", y=labels, x=df["Факт_оплат"] / 1e6,
         orientation="h", marker_color="#2ECC71",
+        text=_m(df["Факт_оплат"] / 1e6), textposition="outside", cliponaxis=False,
     ))
     fig.update_layout(
         **_CHART_LAYOUT,
@@ -165,25 +171,32 @@ def make_portfolio_chart(fin_df: pd.DataFrame) -> go.Figure | None:
         xaxis_title="млн ₽",
         title="Бюджет vs Факт по проектам",
     )
+    fig.update_layout(margin_r=80)   # extra room for outside text labels
     return fig
 
 
 def make_monthly_bars_from(plan: list, fact: list, title: str) -> go.Figure:
     """Grouped bar chart from pre-computed plan/fact lists (тыс. ₽)."""
     fact_colors = ["#2ECC71" if f <= p else "#E74C3C" for f, p in zip(fact, plan)]
+
+    def _t(vals):
+        return [f"{v:.0f}" if v > 0 else "" for v in vals]
+
     fig = go.Figure()
     fig.add_trace(go.Bar(
         name="План", x=MONTH_NAMES, y=plan,
         marker_color="#3498DB", opacity=0.75,
+        text=_t(plan), textposition="outside", cliponaxis=False,
     ))
     fig.add_trace(go.Bar(
         name="Факт", x=MONTH_NAMES, y=fact,
         marker_color=fact_colors,
+        text=_t(fact), textposition="outside", cliponaxis=False,
     ))
     fig.update_layout(
         **_CHART_LAYOUT,
         barmode="group",
-        height=260,
+        height=300,
         yaxis_title="тыс. ₽",
         title=title,
     )
@@ -194,23 +207,31 @@ def make_cumulative_from(plan: list, fact: list, title: str) -> go.Figure:
     """Line chart: cumulative plan vs fact from pre-computed lists (тыс. ₽)."""
     cum_plan = list(pd.Series(plan, dtype=float).cumsum())
     cum_fact = list(pd.Series(fact, dtype=float).cumsum())
+
+    def _t(vals):
+        return [f"{v:.0f}" if v > 0 else "" for v in vals]
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         name="Накоп. план", x=MONTH_NAMES, y=cum_plan,
-        mode="lines+markers",
+        mode="lines+markers+text",
         line=dict(color="#3498DB", width=2, dash="dot"),
         marker=dict(size=5),
+        text=_t(cum_plan), textposition="top center",
+        textfont=dict(size=10, color="#3498DB"),
     ))
     fig.add_trace(go.Scatter(
         name="Накоп. факт", x=MONTH_NAMES, y=cum_fact,
-        mode="lines+markers",
+        mode="lines+markers+text",
         line=dict(color="#2ECC71", width=2),
         marker=dict(size=5),
         fill="tozeroy", fillcolor="rgba(46,204,113,0.08)",
+        text=_t(cum_fact), textposition="bottom center",
+        textfont=dict(size=10, color="#27AE60"),
     ))
     fig.update_layout(
         **_CHART_LAYOUT,
-        height=260,
+        height=300,
         yaxis_title="тыс. ₽",
         title=title,
     )
@@ -245,7 +266,7 @@ if not budg_by_prj.empty:
         labels=labels_pie,
         values=(budg_by_prj / 1_000).tolist(),
         hole=0.45,
-        textinfo="percent",
+        texttemplate="%{percent:.0%}<br>%{value:.0f} тыс",
         hovertemplate="%{label}: %{value:.1f} тыс. ₽<extra></extra>",
     ))
     donut_prj.update_layout(

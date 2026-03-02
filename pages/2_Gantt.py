@@ -222,8 +222,57 @@ if gantt_rows:
             xaxis_title="",
             yaxis_title="",
             legend_title="Статус",
-            margin=dict(l=0, r=0, t=10, b=50),
+            margin=dict(l=0, r=0, t=40, b=50),
         )
+
+        # ── Year separators: alternating bands + boundary lines + labels ──────
+        x_min = gantt_df["Начало"].min()
+        x_max = gantt_df["Конец"].max()
+        first_year = x_min.year
+        # x_max may land on Jan 1 of the next year (end-of-month offset), so
+        # subtract one day to get the last calendar year that actually has data.
+        last_year = (x_max - pd.Timedelta(days=1)).year
+
+        # Pin the x-axis to the actual data range — prevents Plotly from
+        # auto-expanding into empty years beyond the data.
+        fig.update_xaxes(range=[str(x_min), str(x_max)])
+
+        for i, year in enumerate(range(first_year, last_year + 1)):
+            y0 = pd.Timestamp(f"{year}-01-01")
+            y1 = pd.Timestamp(f"{year + 1}-01-01")
+
+            # Alternating light background (even years slightly shaded)
+            if i % 2 == 0:
+                fig.add_vrect(
+                    x0=str(y0), x1=str(y1),
+                    fillcolor="rgba(44,62,80,0.04)",
+                    layer="below", line_width=0,
+                )
+
+            # Hard boundary line at Jan 1 (skip the very first year's left edge)
+            if year > first_year:
+                fig.add_vline(
+                    x=str(y0),
+                    line_width=1.5,
+                    line_color="rgba(231,76,60,0.75)",
+                    line_dash="dash",
+                )
+
+            # Year label centred on the visible slice of this year's band
+            vis_start = max(y0, x_min)
+            vis_end   = min(y1, x_max)
+            if vis_start < vis_end:
+                mid = vis_start + (vis_end - vis_start) / 2
+                fig.add_annotation(
+                    x=str(mid), y=1.02, yref="paper",
+                    text=f"<b>{year}</b>",
+                    showarrow=False,
+                    font=dict(size=12, color="#2C3E50"),
+                    bgcolor="rgba(236,240,241,0.90)",
+                    bordercolor="#95A5A6", borderwidth=1, borderpad=4,
+                    xanchor="center",
+                )
+
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Нет данных о сроках для построения Ганта. Проверьте колонку 'Плановый срок'.")

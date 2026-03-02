@@ -3,7 +3,7 @@ Page 4 — Project teams and bonus distribution calculator
 """
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="Team", page_icon="👥", layout="wide")
 
@@ -14,6 +14,41 @@ authenticator = require_auth()
 render_sidebar_user(authenticator)
 
 st.title("👥 Команды и распределение премий")
+
+# ── CSS ───────────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* Цветные бейджи ролей */
+.role-badge { display:inline-block; font-size:0.72em; font-weight:700;
+              padding:2px 9px; border-radius:20px; color:#fff; }
+.role-A  { background:#E74C3C; }
+.role-BA { background:#3498DB; }
+.role-S  { background:#2ECC71; }
+
+/* Контейнер матрицы */
+.team-wrap { width:100%; overflow-x:auto; margin-bottom:20px;
+             border:1px solid #e0e4e8; border-radius:8px; }
+
+/* Таблица */
+.team-table { border-collapse:collapse; width:100%; font-size:0.80em; background:#fff; }
+.team-table thead th { background:#2C3E50; color:#ECF0F1; font-weight:700;
+                       padding:6px 8px; text-align:center; border:1px solid #1A252F;
+                       white-space:nowrap; }
+.team-table td { padding:4px 6px; border:1px solid #E8E8E8; text-align:center; }
+.team-table td.td-code { text-align:left; font-size:0.78em; font-weight:700;
+                         color:#95a5a6; text-transform:uppercase; white-space:nowrap; }
+.team-table td.td-code a { color:#2980b9; text-decoration:none; }
+.team-table td.td-code a:hover { text-decoration:underline; }
+.team-table tr:nth-child(even) td { background:#F8FAFB; }
+.team-table tr:hover td { background:#EBF5FB; }
+
+/* Итоговая строка */
+.team-table tr.summary-row td { background:#2C3E50 !important;
+                                 color:#ECF0F1 !important; font-weight:700;
+                                 border:1px solid #1A252F; }
+.team-table tr.summary-row td:first-child { text-align:left; }
+</style>
+""", unsafe_allow_html=True)
 
 # ── Load ─────────────────────────────────────────────────────────────────────
 with st.spinner("Загрузка данных..."):
@@ -27,36 +62,95 @@ code_col = _find_col(team, ["Код проекта", "Код"])
 name_col = _find_col(team, ["Название"])
 emp_cols = [c for c in team.columns if c not in {code_col, name_col} and c]
 
-# ── Participation matrix ─────────────────────────────────────────────────────
-st.subheader("Матрица участия")
-
 ROLE_COLORS = {"A": "#E74C3C", "БА": "#3498DB", "S": "#2ECC71"}
+VALID_ROLES = {"A", "S", "БА"}
 
-def color_role(val):
-    color = ROLE_COLORS.get(str(val).strip(), "")
-    return f"background-color: {color}; color: white;" if color else ""
+# ── KPI computation ───────────────────────────────────────────────────────────
+emp_project_counts: dict = {}   # переиспользуется в матрице и графике
+total_employees = 0
+total_rp = 0
 
-matrix = team.set_index(code_col).reset_index() if code_col else team.copy()
+for emp in emp_cols:
+    col_data = team[emp].fillna("").astype(str).str.strip()
+    active = col_data[col_data.isin(VALID_ROLES)]
+    if not active.empty:
+        total_employees += 1
+        emp_project_counts[emp] = len(active)
+        if "A" in active.values:
+            total_rp += 1
 
-# Normalize: all cells must be plain strings for Arrow serialisation
-matrix_clean = matrix[emp_cols].fillna("").astype(str)
-matrix_clean = matrix_clean.map(lambda x: "" if x.strip().lower() == "nan" else x.strip())
+avg_workload = round(sum(emp_project_counts.values()) / total_employees, 1) \
+               if total_employees else 0.0
+total_projects = len(team)
 
-# Restore project codes as first column for context
-if code_col and code_col in matrix.columns:
-    matrix_clean.insert(0, code_col, matrix[code_col].values)
-
-try:
-    styled = matrix_clean.style.map(color_role, subset=emp_cols)
-    st.dataframe(styled, use_container_width=True, hide_index=True)
-except Exception:
-    st.dataframe(matrix_clean, use_container_width=True, hide_index=True)
-
-st.caption("**A** — руководитель проекта (красный)  |  **БА** — бизнес-аналитик (синий)  |  **S** — участник (зелёный)")
+# ── KPI render ────────────────────────────────────────────────────────────────
+k1, k2, k3, k4 = st.columns(4)
+k1.metric("Сотрудников в командах", total_employees)
+k2.metric("Проектов", total_projects)
+k3.metric("Руководителей (РП)", total_rp)
+k4.metric("Среднее проектов / чел.", avg_workload)
 
 st.divider()
 
-# ── Employee profile ─────────────────────────────────────────────────────────
+# ── HTML-матрица участия ──────────────────────────────────────────────────────
+st.subheader("Матрица участия")
+
+
+def build_role_badge(role_val: str) -> str:
+    v = str(role_val).strip()
+    if v == "A":
+        return '<span class="role-badge role-A">A</span>'
+    if v == "БА":
+        return '<span class="role-badge role-BA">БА</span>'
+    if v == "S":
+        return '<span class="role-badge role-S">S</span>'
+    return ""
+
+
+def build_team_matrix(df: pd.DataFrame, code_col: str, emp_cols: list) -> str:
+    # Header
+    header_cells = '<th>Проект</th>' + "".join(
+        f"<th>{emp}</th>" for emp in emp_cols
+    )
+    # Body rows
+    body_rows = []
+    for _, row in df.iterrows():
+        code_val = str(row.get(code_col, "")).strip() if code_col else ""
+        code_td = (
+            f'<td class="td-code"><a href="/Project?project={code_val}">{code_val}</a></td>'
+            if code_val else '<td class="td-code"></td>'
+        )
+        role_cells = "".join(
+            f"<td>{build_role_badge(row.get(emp, ''))}</td>" for emp in emp_cols
+        )
+        body_rows.append(f"<tr>{code_td}{role_cells}</tr>")
+
+    # Summary row
+    summary_cells = "".join(
+        f"<td>{emp_project_counts.get(emp, '') or ''}</td>"
+        if emp_project_counts.get(emp, 0) > 0
+        else "<td></td>"
+        for emp in emp_cols
+    )
+    summary_row = (
+        f'<tr class="summary-row"><td>Итого проектов</td>{summary_cells}</tr>'
+    )
+
+    return (
+        '<div class="team-wrap">'
+        '<table class="team-table">'
+        f"<thead><tr>{header_cells}</tr></thead>"
+        f"<tbody>{''.join(body_rows)}{summary_row}</tbody>"
+        "</table></div>"
+    )
+
+
+st.markdown(build_team_matrix(team, code_col, emp_cols), unsafe_allow_html=True)
+st.caption("**A** — руководитель проекта  |  **БА** — бизнес-аналитик  |  **S** — участник")
+
+st.divider()
+
+# ── Профиль сотрудника ────────────────────────────────────────────────────────
 st.subheader("Сводка по сотруднику")
 
 selected_emp = st.selectbox("Выбрать сотрудника", emp_cols)
@@ -74,7 +168,62 @@ if selected_emp:
 
 st.divider()
 
-# ── Bonus calculator ─────────────────────────────────────────────────────────
+# ── График нагрузки (stacked bar) ─────────────────────────────────────────────
+st.subheader("Нагрузка по сотрудникам (по ролям)")
+
+workload_rows = []
+for emp in emp_cols:
+    if emp not in emp_project_counts:
+        continue
+    col_data = team[emp].fillna("").astype(str).str.strip()
+    count_a  = int((col_data == "A").sum())
+    count_ba = int((col_data == "БА").sum())
+    count_s  = int((col_data == "S").sum())
+    workload_rows.append({
+        "Сотрудник": emp,
+        "A":   count_a,
+        "БА":  count_ba,
+        "S":   count_s,
+        "Всего": count_a + count_ba + count_s,
+    })
+
+if workload_rows:
+    wl_df = pd.DataFrame(workload_rows).sort_values("Всего", ascending=True)
+
+    fig_wl = go.Figure()
+    for role, color, label in [
+        ("S",  "#2ECC71", "S — участник"),
+        ("БА", "#3498DB", "БА — бизнес-аналитик"),
+        ("A",  "#E74C3C", "A — руководитель"),
+    ]:
+        vals = wl_df[role]
+        fig_wl.add_trace(go.Bar(
+            name=label,
+            y=wl_df["Сотрудник"],
+            x=vals,
+            orientation="h",
+            marker_color=color,
+            text=[str(v) if v > 0 else "" for v in vals],
+            textposition="inside",
+            insidetextanchor="middle",
+        ))
+
+    fig_wl.update_layout(
+        barmode="stack",
+        height=max(280, len(wl_df) * 38 + 80),
+        xaxis_title="Количество проектов",
+        yaxis_title="",
+        margin=dict(l=0, r=0, t=10, b=0),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    fig_wl.update_xaxes(dtick=1, gridcolor="#E8E8E8", showgrid=True)
+    st.plotly_chart(fig_wl, use_container_width=True)
+
+st.divider()
+
+# ── Калькулятор премий ────────────────────────────────────────────────────────
 st.subheader("Распределение премии")
 
 bonus_pool = st.number_input(
@@ -91,6 +240,15 @@ method = st.radio(
 )
 
 ROLE_WEIGHTS = {"A": 3, "БА": 2, "S": 1}
+
+
+def fmt_bonus_label(v: float) -> str:
+    if v >= 1_000_000:
+        return f"{v / 1_000_000:.2f} млн"
+    if v >= 1_000:
+        return f"{v / 1_000:.1f} тыс"
+    return f"{v:.0f} ₽"
+
 
 if st.button("Рассчитать"):
     # Build participation table: employee → list of roles
@@ -141,14 +299,27 @@ if st.button("Рассчитать"):
             mime="text/csv",
         )
 
-        # Viz
-        fig = px.bar(
-            result_df.sort_values("Премия (₽)", ascending=True),
-            x="Премия (₽)",
-            y="Сотрудник",
+        # Viz — go.Bar with text labels
+        sorted_df = result_df.sort_values("Премия (₽)", ascending=True)
+        bar_colors = sorted_df["Макс. роль"].map(ROLE_COLORS).fillna("#95A5A6").tolist()
+
+        fig = go.Figure(go.Bar(
+            y=sorted_df["Сотрудник"],
+            x=sorted_df["Премия (₽)"],
             orientation="h",
-            color="Макс. роль",
-            color_discrete_map={"A": "#E74C3C", "БА": "#3498DB", "S": "#2ECC71"},
+            marker_color=bar_colors,
+            text=sorted_df["Премия (₽)"].apply(fmt_bonus_label),
+            textposition="outside",
+            cliponaxis=False,
+        ))
+        fig.update_layout(
+            height=max(300, len(sorted_df) * 35 + 80),
+            margin=dict(l=0, r=130, t=10, b=0),
+            plot_bgcolor="#ffffff",
+            paper_bgcolor="rgba(0,0,0,0)",
+            xaxis_title="₽",
+            yaxis_title="",
+            showlegend=False,
         )
-        fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=max(300, len(result_df) * 35 + 80))
+        fig.update_xaxes(gridcolor="#E8E8E8", showgrid=True)
         st.plotly_chart(fig, use_container_width=True)

@@ -529,12 +529,21 @@ if not fin_df.empty:
     fin_melted["Тип"] = fin_melted["Тип"].map(
         {"Бюджет": "Бюджет", "План_оплат": "План", "Факт_оплат": "Факт"}
     )
+    def _fmt_rub(v: float) -> str:
+        if v <= 0:         return ""
+        if v >= 1_000_000: return f"{v/1_000_000:.1f} млн"
+        if v >= 1_000:     return f"{v/1_000:.0f} тыс"
+        return f"{v:.0f}"
+
+    fin_melted["Подпись"] = fin_melted["Сумма"].apply(_fmt_rub)
+
     fig2 = px.bar(
         fin_melted, x="Сумма", y="Код", color="Тип", orientation="h",
         color_discrete_map={"Бюджет": "#3498DB", "План": "#9B59B6", "Факт": "#2ECC71"},
-        barmode="group",
+        barmode="group", text="Подпись",
     )
-    fig2.update_layout(margin=dict(t=0, b=0, l=0, r=0),
+    fig2.update_traces(textposition="outside", cliponaxis=False)
+    fig2.update_layout(margin=dict(t=0, b=0, l=0, r=100),
                        yaxis={"categoryorder": "total ascending"}, height=400)
     st.plotly_chart(fig2, use_container_width=True)
 

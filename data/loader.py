@@ -166,12 +166,15 @@ def load_prj_status() -> pd.DataFrame:
     fixed_cols = ["№", "Код проекта", "Название работы", "col3", "Тип", "Доп. описание", "Срок"]
     n_fixed = len(fixed_cols)
 
-    # Build month column labels.
-    # Year cells are merged in the sheet, so gspread returns the value only in the
-    # first cell of each year group — all others are empty. Forward-fill current_year
-    # so every monthly column gets a proper "YYYY_Месяц" label.
-    # Columns with an empty month cell are visual separators — skip them entirely.
-    month_cols = []
+    # Build month column labels AND record each label's raw sheet column index.
+    # Year cells are merged → gspread returns the year value only in the first cell;
+    # subsequent cells of the same year group are empty → forward-fill current_year.
+    # Columns with an empty month cell are visual separators (e.g. between year groups)
+    # — skip them in the label list but keep track of real indices so that data rows
+    # are read from the correct raw positions (without this, every column after a
+    # separator would be shifted one position to the left).
+    month_cols: list[str] = []
+    month_raw_indices: list[int] = []  # raw sheet column positions for each label
     current_year = ""
     for i in range(n_fixed, max(len(year_row), len(month_row))):
         y = year_row[i].strip() if i < len(year_row) else ""
@@ -179,9 +182,10 @@ def load_prj_status() -> pd.DataFrame:
             current_year = y
         month = month_row[i].strip() if i < len(month_row) else ""
         if not month:
-            continue  # separator column — skip
+            continue  # separator column — skip label but remember we've passed it
         label = f"{current_year}_{month}" if current_year else f"col_{i}"
         month_cols.append(label)
+        month_raw_indices.append(i)
 
     all_cols = fixed_cols + month_cols
 
@@ -190,8 +194,11 @@ def load_prj_status() -> pd.DataFrame:
         # Skip completely empty rows (e.g. spacer rows between projects)
         if not row or not any(c.strip() for c in row):
             continue
-        padded = row + [""] * (len(all_cols) - len(row))
-        rows.append(padded[: len(all_cols)])
+        # Fixed columns: positions 0 … n_fixed-1 (sequential, no gaps)
+        fixed_data = [row[j].strip() if j < len(row) else "" for j in range(n_fixed)]
+        # Month columns: use actual raw indices to avoid the separator-shift bug
+        month_data = [row[idx].strip() if idx < len(row) else "" for idx in month_raw_indices]
+        rows.append(fixed_data + month_data)
 
     df = pd.DataFrame(rows, columns=all_cols)
     df = _strip_df(df)
@@ -499,26 +506,36 @@ def parse_date_range(text: str):
         "сен": "09", "окт": "10", "ноя": "11", "дек": "12",
     }
 
-    def parse_single(s: str):
+    def parse_single(s: str) -> tuple:
+        """Return (pd.Timestamp, offset_months) where offset_months is the
+        number of months to add to convert the parsed date to an exclusive end.
+        Quarter → 3 months, month → 1 month, year → 12 months."""
         s = s.strip()
         # Match "Q1 2025"
         m = re.match(r"(Q[1-4])\s*(\d{4})", s, re.IGNORECASE)
         if m:
             month = quarter_map[m.group(1).upper()]
-            return pd.Timestamp(f"{m.group(2)}-{month}-01")
+            return pd.Timestamp(f"{m.group(2)}-{month}-01"), 3
         # Match "янв 2025"
         for ru, num in month_map.items():
             if ru in s.lower():
                 year_m = re.search(r"(\d{4})", s)
                 if year_m:
-                    return pd.Timestamp(f"{year_m.group(1)}-{num}-01")
+                    return pd.Timestamp(f"{year_m.group(1)}-{num}-01"), 1
         # Match plain "2025"
         m = re.match(r"(\d{4})", s)
         if m:
-            return pd.Timestamp(f"{m.group(1)}-01-01")
-        return None
+            return pd.Timestamp(f"{m.group(1)}-01-01"), 12
+        return None, 0
 
     parts = re.split(r"\s*[-–]\s*", text, maxsplit=1)
-    start = parse_single(parts[0]) if len(parts) > 0 else None
-    end   = parse_single(parts[1]) if len(parts) > 1 else None
-    return start, end
+    start_ts, _      = parse_single(parts[0]) if len(parts) > 0 else (None, 0)
+    end_ts,   e_off  = parse_single(parts[1]) if len(parts) > 1 else (None, 0)
+    # Shift end to the first day of the period *after* the end unit so the bar
+    # covers the full end month/quarter (Q4 2026 → Jan 2027, дек 2026 → Jan 2027).
+    if end_ts is not None and e_off:
+        try:
+            end_ts = end_ts + pd.DateOffset(months=e_off)
+        except Exception:
+            pass
+    return start_ts, end_ts
