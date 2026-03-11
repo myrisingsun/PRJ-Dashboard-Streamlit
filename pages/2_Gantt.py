@@ -2,7 +2,9 @@
 Page 2 — Gantt chart and milestone plan/fact table (Sprint 2 redesign)
 """
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.express as px
+import plotly.graph_objects as go
 import pandas as pd
 from typing import Optional
 
@@ -134,6 +136,9 @@ def _work_item_date_range(
 
 # ── Build Gantt dataframe ─────────────────────────────────────────────────────
 gantt_rows = []
+s_markers: list[dict] = []   # Start markers (value "S" in monthly cols)
+e_markers: list[dict] = []   # End   markers (value "E" in monthly cols)
+c_markers: list[dict] = []   # Checkpoint markers (value "C" or "C <text>")
 
 for _, row in filtered_prj.iterrows():
     code   = str(row.get(code_col,   "") or "") if code_col   else ""
@@ -157,7 +162,7 @@ for _, row in filtered_prj.iterrows():
         "Код":       code,
     })
 
-    # Work items from PRJ_STATUS for this project
+    # Work items + S/E markers from PRJ_STATUS for this project
     if not status.empty and "Код проекта" in status.columns and month_cols:
         prj_status = status[status["Код проекта"] == code]
         plan_mask  = prj_status["Тип"].str.strip().str.lower().isin(["план", "plan"])
@@ -180,6 +185,33 @@ for _, row in filtered_prj.iterrows():
                 "Цвет_ключ": "Работа",
                 "Код":       code,
             })
+
+        # Collect S / E / C markers from all rows (plan + fact) for this project.
+        for _, srow in prj_status.iterrows():
+            # Build row work-name for use as C-marker comment fallback
+            row_work = str(srow.get("col3", "")).strip()
+            if not row_work:
+                row_work = str(srow.get("Название работы", "")).strip()
+            if not row_work:
+                row_work = str(srow.get("Доп. описание", "")).strip()
+
+            for i, col in enumerate(month_cols):
+                raw_val = str(srow.get(col, "")).strip()
+                val_up  = raw_val.upper()
+                date = month_dates[i]
+                if date is None:
+                    continue
+                mid = date + pd.DateOffset(days=15)
+
+                if val_up == "S":
+                    s_markers.append({"x": mid, "y": label})
+                elif val_up == "E":
+                    e_markers.append({"x": mid, "y": label})
+                elif val_up.startswith("C"):
+                    # Comment: text after "C " in cell, or fall back to row work name
+                    inline = raw_val[1:].strip()
+                    comment = inline if inline else row_work
+                    c_markers.append({"x": mid, "y": label, "comment": comment})
 
 # ── Gantt chart ───────────────────────────────────────────────────────────────
 st.subheader("Digital Projects Roadmap")
@@ -224,6 +256,51 @@ if gantt_rows:
             legend_title="Статус",
             margin=dict(l=0, r=0, t=40, b=50),
         )
+
+        # ── S / E milestone markers overlaid on the timeline ─────────────────
+        if s_markers:
+            df_s = pd.DataFrame(s_markers)
+            fig.add_trace(go.Scatter(
+                x=df_s["x"], y=df_s["y"],
+                mode="markers",
+                name="Старт проекта (S)",
+                marker=dict(
+                    symbol="triangle-right", size=14, color="#27AE60",
+                    line=dict(width=1, color="#1E8449"),
+                ),
+                showlegend=True,
+            ))
+
+        if e_markers:
+            df_e = pd.DataFrame(e_markers)
+            fig.add_trace(go.Scatter(
+                x=df_e["x"], y=df_e["y"],
+                mode="markers+text",
+                name="Завершение проекта (E)",
+                marker=dict(
+                    symbol="circle", size=16, color="#27AE60",
+                    line=dict(width=1, color="#1E8449"),
+                ),
+                text=["✔"] * len(df_e),
+                textposition="middle center",
+                textfont=dict(color="white", size=10),
+                showlegend=True,
+            ))
+
+        if c_markers:
+            df_c = pd.DataFrame(c_markers)
+            fig.add_trace(go.Scatter(
+                x=df_c["x"], y=df_c["y"],
+                mode="markers",
+                name="Контрольная точка (C)",
+                marker=dict(
+                    symbol="circle", size=14, color="#F39C12",
+                    line=dict(width=2, color="#D68910"),
+                ),
+                hovertext=[f"<b>{r['y']}</b><br>◆ {r['comment']}" for _, r in df_c.iterrows()],
+                hoverinfo="text",
+                showlegend=True,
+            ))
 
         # ── Year separators: alternating bands + boundary lines + labels ──────
         x_min = gantt_df["Начало"].min()
@@ -319,12 +396,23 @@ else:
             year_headers[""] += 1
             month_labels.append(col)
 
-    def cell_symbol(val: str) -> str:
+    def cell_symbol(val: str, fallback_comment: str = "") -> str:
         v = val.strip()
         if v == "1":
             return '<span class="dot">●</span>'
         if v.upper() == "X":
             return '<span class="star">★</span>'
+        if v.upper() == "S":
+            return '<span class="marker-s">▶</span>'
+        if v.upper() == "E":
+            return '<span class="marker-e">✔</span>'
+        if v.upper().startswith("C"):
+            inline = v[1:].strip()
+            tip = inline if inline else fallback_comment
+            safe_tip = tip.replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;")
+            return (
+                f'<span class="marker-c" data-comment="{safe_tip}" onclick="cpShow(this)">◆</span>'
+            )
         return ""
 
     # ── Shared table structure ────────────────────────────────────────────────
@@ -375,6 +463,7 @@ else:
         tbody_parts: list[str] = []
         rows_list = list(prj_status_rows.iterrows())
         i = 0
+        first_task = True   # used to skip separator before the very first pair
         while i < len(rows_list):
             _, cur_row = rows_list[i]
             row_type = str(cur_row.get("Тип", "")).strip().lower()
@@ -401,12 +490,16 @@ else:
             if not work_name:
                 work_name = str(plan_row.get("Доп. описание", "")).strip()
 
+            # Add thick top border between task pairs (skip before the first pair)
+            sep_class = "" if first_task else " task-separator"
+            first_task = False
+
             plan_cells = "".join(
-                f"<td>{cell_symbol(str(plan_row.get(c, '')))}</td>"
+                f"<td>{cell_symbol(str(plan_row.get(c, '')), work_name)}</td>"
                 for c in trimmed_months
             )
             tbody_parts.append(
-                f'<tr class="plan-row">'
+                f'<tr class="plan-row{sep_class}">'
                 f'<td class="work-name">{work_name}</td>'
                 f'<td class="type-cell">План</td>'
                 f'{plan_cells}</tr>'
@@ -414,7 +507,7 @@ else:
 
             if fact_row is not None:
                 fact_cells = "".join(
-                    f"<td>{cell_symbol(str(fact_row.get(c, '')))}</td>"
+                    f"<td>{cell_symbol(str(fact_row.get(c, '')), work_name)}</td>"
                     for c in trimmed_months
                 )
                 tbody_parts.append(
@@ -451,9 +544,59 @@ else:
 .status-table td { padding: 2px 2px; text-align: center; border: 1px solid #E8E8E8; overflow: hidden; }
 .status-table td.work-name { text-align: left; white-space: normal; word-break: break-word; padding-left: 5px; }
 .status-table td.type-cell { color: #7F8C8D; font-size: 0.85em; }
-.dot  { color: #27AE60; }
-.star { color: #F39C12; }
+.dot      { color: #27AE60; }
+.star     { color: #F39C12; }
+.marker-s { color: #27AE60; font-weight: 700; } /* ▶ start */
+.marker-e { color: #27AE60; font-weight: 700; }
+
+.marker-c { color: #F39C12; font-weight: 700; cursor: pointer; }
+.marker-c:hover { opacity: 0.75; }
+
+/* Thick separator between Plan+Fact task pairs */
+.status-table tr.task-separator td { border-top: 2px solid #BDC3C7 !important; }
+
+/* Checkpoint popup */
+#cp-popup {
+    display: none; position: fixed; z-index: 99999;
+    background: #FFFDE7; border: 2px solid #F39C12;
+    border-radius: 8px; padding: 12px 14px 10px;
+    min-width: 220px; max-width: 380px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.20);
+    font-size: 0.88em; color: #2C3E50; line-height: 1.5;
+}
+#cp-popup-title { font-weight: 700; color: #B7770D; margin-bottom: 6px; }
+#cp-popup-close {
+    float: right; margin: -2px 0 0 10px;
+    background: #F39C12; border: none; color: #fff;
+    border-radius: 4px; padding: 2px 9px; cursor: pointer;
+}
 </style>
+
+<div id="cp-popup">
+  <button id="cp-popup-close" onclick="document.getElementById('cp-popup').style.display='none'">✕</button>
+  <div id="cp-popup-title">◆ Контрольная точка</div>
+  <div id="cp-popup-text"></div>
+</div>
+
+<script>
+function cpShow(el) {
+    var p = document.getElementById('cp-popup');
+    document.getElementById('cp-popup-text').textContent = el.dataset.comment || '—';
+    p.style.display = 'block';
+    var r = el.getBoundingClientRect();
+    var left = Math.min(r.left, window.innerWidth - 400);
+    p.style.left = Math.max(8, left) + 'px';
+    p.style.top  = (r.bottom + 6) + 'px';
+}
+document.addEventListener('click', function(e) {
+    var p = document.getElementById('cp-popup');
+    if (!e.target.classList.contains('marker-c') && !p.contains(e.target))
+        p.style.display = 'none';
+});
+</script>
 """ + "\n".join(blocks)
 
-    st.markdown(full_html, unsafe_allow_html=True)
+    # Calculate iframe height: header rows + data rows + per-project overhead
+    total_rows = sum(p.count('<tr') for p in blocks)
+    iframe_h = max(400, len(blocks) * 90 + total_rows * 24 + 60)
+    components.html(full_html, height=iframe_h, scrolling=False)
