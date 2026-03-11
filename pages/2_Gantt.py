@@ -45,7 +45,14 @@ if priority_col:
     prj = prj.sort_values("_prio").drop(columns=["_prio"])
 
 # ── Sidebar filters ───────────────────────────────────────────────────────────
-all_projects  = prj[code_col].dropna().tolist()           if code_col    else []
+# Union of PRJ_LIST codes + any extra codes present only in PRJ_STATUS
+_list_codes = prj[code_col].dropna().tolist() if code_col else []
+_list_codes_set = set(_list_codes)
+_status_extra = (
+    [c for c in status["Код проекта"].dropna().unique() if c not in _list_codes_set]
+    if not status.empty else []
+)
+all_projects = _list_codes + _status_extra
 all_statuses  = sorted(prj[status_col].dropna().unique()) if status_col  else []
 all_priorities = ["Высокий", "Средний", "Низкий"]
 
@@ -441,9 +448,20 @@ else:
     )
 
     # ── Build one HTML block with all project tables ───────────────────────────
-    prj_order = filtered_prj[code_col].dropna().tolist() if code_col else (
-        status["Код проекта"].dropna().unique().tolist()
-    )
+    # Start from filtered PRJ_LIST order, then append any STATUS-only codes
+    # that match the active code filter (covers projects missing from PRJ_LIST).
+    if code_col:
+        _filtered_codes = filtered_prj[code_col].dropna().tolist()
+        _filtered_set   = set(_filtered_codes)
+        _status_codes   = status["Код проекта"].dropna().unique().tolist()
+        # Respect the code multiselect filter for STATUS-only projects
+        _extra = [
+            c for c in _status_codes
+            if c not in _filtered_set and (not sel_codes or c in sel_codes)
+        ]
+        prj_order = _filtered_codes + _extra
+    else:
+        prj_order = status["Код проекта"].dropna().unique().tolist()
 
     blocks: list[str] = []
 
@@ -596,7 +614,9 @@ document.addEventListener('click', function(e) {
 </script>
 """ + "\n".join(blocks)
 
-    # Calculate iframe height: header rows + data rows + per-project overhead
+    # Calculate iframe height dynamically so nothing is clipped.
+    # Each <tr> renders ~32px; each project block adds ~110px overhead
+    # (title bar + 2 thead rows + margins). Add 250px buffer for safety.
     total_rows = sum(p.count('<tr') for p in blocks)
-    iframe_h = max(400, len(blocks) * 90 + total_rows * 24 + 60)
+    iframe_h = max(500, len(blocks) * 110 + total_rows * 32 + 250)
     components.html(full_html, height=iframe_h, scrolling=False)
