@@ -47,6 +47,17 @@ st.markdown("""
                                  color:#ECF0F1 !important; font-weight:700;
                                  border:1px solid #1A252F; }
 .team-table tr.summary-row td:first-child { text-align:left; }
+
+/* Название проекта под кодом в матрице */
+.td-name { font-size:0.82em; color:#7f8c8d; font-weight:400;
+           text-transform:none; margin-top:2px; white-space:normal; }
+
+/* Карточка команды проекта */
+.prj-team-wrap { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.prj-member-card { display:flex; align-items:center; gap:6px;
+                   background:#F8FAFB; border:1px solid #E8E8E8;
+                   border-radius:6px; padding:5px 10px; font-size:0.85em; }
+.prj-member-name { font-weight:600; color:#2C3E50; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -116,8 +127,10 @@ def build_team_matrix(df: pd.DataFrame, code_col: str, emp_cols: list) -> str:
     body_rows = []
     for _, row in df.iterrows():
         code_val = str(row.get(code_col, "")).strip() if code_col else ""
+        name_val = str(row.get(name_col, "")).strip() if name_col else ""
+        name_part = f'<div class="td-name">{name_val}</div>' if name_val else ""
         code_td = (
-            f'<td class="td-code"><a href="/Project?project={code_val}">{code_val}</a></td>'
+            f'<td class="td-code"><a href="/Project?project={code_val}">{code_val}</a>{name_part}</td>'
             if code_val else '<td class="td-code"></td>'
         )
         role_cells = "".join(
@@ -147,6 +160,61 @@ def build_team_matrix(df: pd.DataFrame, code_col: str, emp_cols: list) -> str:
 
 st.markdown(build_team_matrix(team, code_col, emp_cols), unsafe_allow_html=True)
 st.caption("**A** — руководитель проекта  |  **БА** — бизнес-аналитик  |  **S** — участник")
+
+st.divider()
+
+# ── Команда проекта ───────────────────────────────────────────────────────────
+st.subheader("Команда проекта")
+
+# Build project option list: "CODE — Name" or just "CODE"
+prj_options = []
+for _, row in team.iterrows():
+    code_v = str(row.get(code_col, "")).strip() if code_col else ""
+    name_v = str(row.get(name_col, "")).strip() if name_col else ""
+    if code_v:
+        prj_options.append((f"{code_v} — {name_v}" if name_v else code_v, code_v))
+
+if prj_options:
+    sel_prj_label = st.selectbox(
+        "Выбрать проект",
+        [lbl for lbl, _ in prj_options],
+        key="team_sel_project",
+    )
+    sel_prj_code = next((c for lbl, c in prj_options if lbl == sel_prj_label), None)
+
+    if sel_prj_code and code_col:
+        prj_rows = team[team[code_col] == sel_prj_code]
+        if not prj_rows.empty:
+            prj_row = prj_rows.iloc[0]
+            role_order = {"A": 0, "БА": 1, "S": 2}
+            members = sorted(
+                [(emp, str(prj_row.get(emp, "")).strip())
+                 for emp in emp_cols
+                 if str(prj_row.get(emp, "")).strip() in VALID_ROLES],
+                key=lambda x: role_order.get(x[1], 99),
+            )
+
+            if members:
+                # Metrics
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Всего в команде", len(members))
+                m2.metric("Руководителей (A)", sum(1 for _, r in members if r == "A"))
+                m3.metric("Бизнес-аналитиков (БА)", sum(1 for _, r in members if r == "БА"))
+                m4.metric("Участников (S)", sum(1 for _, r in members if r == "S"))
+
+                # Member cards
+                cards_html = '<div class="prj-team-wrap">'
+                for emp, role in members:
+                    badge = build_role_badge(role)
+                    cards_html += (
+                        f'<div class="prj-member-card">'
+                        f'{badge} <span class="prj-member-name">{emp}</span>'
+                        f'</div>'
+                    )
+                cards_html += "</div>"
+                st.markdown(cards_html, unsafe_allow_html=True)
+            else:
+                st.info("Нет данных о команде для этого проекта.")
 
 st.divider()
 

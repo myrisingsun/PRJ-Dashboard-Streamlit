@@ -7,7 +7,7 @@ import pandas as pd
 st.set_page_config(page_title="Debug", page_icon="🔍", layout="wide")
 
 from auth import render_sidebar_user, require_auth
-from data.loader import _load_raw, load_prj_status
+from data.loader import _load_raw, load_prj_status, load_prj_team, _find_col
 
 authenticator = require_auth()
 render_sidebar_user(authenticator)
@@ -83,6 +83,50 @@ if sheet == "03.PRJ_STATUS":
                 st.info("Plan-строк не найдено для выбранного фильтра.")
         else:
             st.warning("Столбец 'Тип' отсутствует в parsed DataFrame.")
+
+    st.divider()
+
+# ── Parsed team view (for 04.PRJ_TEAM) ────────────────────────────────────────
+if sheet == "04.PRJ_TEAM":
+    st.divider()
+    st.subheader("Распарсенные данные (load_prj_team)")
+    with st.spinner("Парсинг..."):
+        parsed_team = load_prj_team()
+    if parsed_team.empty:
+        st.warning("load_prj_team() вернул пустой DataFrame.")
+    else:
+        code_col = _find_col(parsed_team, ["Код проекта", "Код"])
+        name_col = _find_col(parsed_team, ["Название"])
+        emp_cols = [c for c in parsed_team.columns if c not in {code_col, name_col} and c]
+
+        st.caption(f"Строк: {len(parsed_team)} | Сотрудников: {len(emp_cols)}")
+        st.caption(f"Колонки сотрудников: {emp_cols}")
+
+        # Show full parsed dataframe
+        st.dataframe(parsed_team, use_container_width=True)
+
+        # Per-project summary: who is in each project and with what role
+        st.subheader("Сводка: роли по проектам")
+        VALID_ROLES = {"A", "S", "БА"}
+        rows_summary = []
+        for _, row in parsed_team.iterrows():
+            code_v = str(row.get(code_col, "")).strip() if code_col else ""
+            name_v = str(row.get(name_col, "")).strip() if name_col else ""
+            for emp in emp_cols:
+                role = str(row.get(emp, "")).strip()
+                if role in VALID_ROLES:
+                    rows_summary.append({
+                        "Код": code_v,
+                        "Проект": name_v,
+                        "Сотрудник": emp,
+                        "Роль": role,
+                    })
+        if rows_summary:
+            summary_df = pd.DataFrame(rows_summary)
+            st.dataframe(summary_df, use_container_width=True)
+            st.caption(f"Итого назначений: {len(summary_df)}")
+        else:
+            st.warning("Нет ни одного назначения с ролью A/S/БА — проверьте значения в ячейках.")
 
     st.divider()
 

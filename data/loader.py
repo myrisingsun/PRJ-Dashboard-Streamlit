@@ -270,11 +270,19 @@ def load_prj_team() -> pd.DataFrame:
     clean_names = _dedup_names(raw_names)
 
     header = ["Код проекта", "Название"] + clean_names
-    rows = _non_empty_rows(data, 3)           # data starts at row 3
-    max_len = len(header)
-    rows = [(r + [""] * (max_len - len(r)))[:max_len] for r in rows]
 
-    df = pd.DataFrame(rows, columns=header)
+    # Build rows with explicit index extraction to avoid the "#"-column shift bug.
+    # Raw layout: col 0 = "#" (skip), col 1 = code, col 2 = name, col 3+ = employee roles.
+    # Simply slicing r[:max_len] would include col 0 ("#") and shift every subsequent
+    # column one position to the right — Пахарев (col D=3) would appear as Валяйчиков etc.
+    rows_clean = []
+    for r in _non_empty_rows(data, 3):
+        code_val = r[1].strip() if len(r) > 1 else ""
+        name_val = r[2].strip() if len(r) > 2 else ""
+        emp_vals = [r[i].strip() if i < len(r) else "" for i in range(n_fixed, n_fixed + len(clean_names))]
+        rows_clean.append([code_val, name_val] + emp_vals)
+
+    df = pd.DataFrame(rows_clean, columns=header)
     df = _strip_df(df)
 
     emp_cols = [c for c in clean_names if not c.startswith(("_legend_", "_col_"))]
