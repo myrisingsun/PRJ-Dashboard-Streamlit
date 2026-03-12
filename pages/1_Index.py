@@ -237,12 +237,13 @@ st.title("📋 Портфель проектов")
 
 status_counts = prj[status_col].value_counts() if status_col else pd.Series(dtype=int)
 
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Всего проектов",  len(prj))
-k2.metric("По плану 🟢",     status_counts.get("По плану",      0))
-k3.metric("Есть риски 🔴",   status_counts.get("Есть риски",    0))
-k4.metric("Отстает 🟡",      status_counts.get("Отстает",       0))
-k5.metric("Приостановлен ⚫", status_counts.get("Приостановлен", 0))
+k1, k2, k3, k4, k5, k6 = st.columns(6)
+k1.metric("Всего проектов",     len(prj))
+k2.metric("По плану 🟢",        status_counts.get("По плану",            0))
+k3.metric("Есть риски 🔴",      status_counts.get("Есть риски",          0))
+k4.metric("Отстает 🟡",         status_counts.get("Отстает",             0))
+k5.metric("Приостановлен ⚫",   status_counts.get("Приостановлен",       0))
+k6.metric("Пост. режим 🔵",     status_counts.get("В постоянном режиме", 0))
 
 # ── Sidebar filters ───────────────────────────────────────────────────────────
 all_codes    = prj[code_col].dropna().tolist()          if code_col    else []
@@ -395,10 +396,12 @@ def project_card(row: pd.Series) -> str:
 
     priority = str(row.get(priority_col, "") or "").strip() if priority_col else ""
 
-    color      = STATUS_COLORS.get(status, "#95A5A6")
-    emoji      = STATUS_EMOJI.get(status,  "⚪")
-    pm         = pm_map.get(code, "—")
-    prio_color = PRIORITY_COLORS.get(priority, "#BDC3C7")
+    STATUS_SHORT = {"В постоянном режиме": "В пост. режиме"}
+    color        = STATUS_COLORS.get(status, "#95A5A6")
+    emoji        = STATUS_EMOJI.get(status,  "⚪")
+    status_label = STATUS_SHORT.get(status, status)
+    pm           = pm_map.get(code, "—")
+    prio_color   = PRIORITY_COLORS.get(priority, "#BDC3C7")
 
     # Finance
     budget = plan = fact = exec_p = 0.0
@@ -474,7 +477,7 @@ def project_card(row: pd.Series) -> str:
     <span class="prj-code">{code}</span>
     <div style="display:flex;gap:6px;align-items:center;">
       {prio_html}
-      <span class="prj-badge" style="background:{color}">{emoji} {status}</span>
+      <span class="prj-badge" style="background:{color}">{emoji} {status_label}</span>
     </div>
   </div>
   <a class="prj-name-link" href="/Project?project={code}"><div class="prj-name">{name}</div></a>
@@ -505,47 +508,104 @@ with c_left:
     if status_col and not prj.empty:
         sc = prj[status_col].value_counts().reset_index()
         sc.columns = ["Статус", "Кол-во"]
-        fig = px.pie(sc, names="Статус", values="Кол-во", color="Статус",
-                     color_discrete_map=STATUS_COLORS, hole=0.4)
-        fig.update_layout(margin=dict(t=0, b=0, l=0, r=0))
-        st.plotly_chart(fig, use_container_width=True)
+        sc["Цвет"] = sc["Статус"].map(STATUS_COLORS).fillna("#95A5A6")
+        status_order = ["Приостановлен", "Отстает", "Есть риски", "В постоянном режиме", "По плану"]
+        sc["_order"] = sc["Статус"].map({s: i for i, s in enumerate(status_order)}).fillna(99)
+        sc = sc.sort_values("_order", ascending=True).drop(columns=["_order"])
+        fig = px.bar(sc, x="Кол-во", y="Статус", orientation="h",
+                     color="Статус", color_discrete_map=STATUS_COLORS,
+                     text="Кол-во")
+        fig.update_traces(textposition="outside", cliponaxis=False,
+                          textfont_size=13, marker_line_width=0)
+        fig.update_layout(margin=dict(t=0, b=0, l=0, r=50),
+                          showlegend=False, height=max(160, len(sc) * 44),
+                          yaxis_title=None, xaxis_title=None,
+                          yaxis=dict(categoryorder="array",
+                                     categoryarray=["Приостановлен", "Отстает", "Есть риски",
+                                                    "В постоянном режиме", "По плану"]),
+                          xaxis=dict(showgrid=False, showticklabels=False,
+                                     range=[0, sc["Кол-во"].max() * 1.3]))
+        ev_status = st.plotly_chart(fig, use_container_width=True,
+                                    on_select="rerun", key="bar_status",
+                                    selection_mode="points")
+        pts = (ev_status.selection.points if ev_status and ev_status.selection else [])
+        if pts:
+            clicked_status = pts[0].get("y", "")
+            if clicked_status:
+                subset = prj[prj[status_col] == clicked_status]
+                cols_show = [c for c in [code_col, name_col, priority_col] if c]
+                st.caption(f"Статус **{STATUS_EMOJI.get(clicked_status, '')} {clicked_status}** — {len(subset)} проект(ов):")
+                st.dataframe(subset[cols_show], use_container_width=True, hide_index=True)
 
 with c_right:
     st.subheader("Распределение по приоритетам")
     if priority_col and not prj.empty:
         pc = prj[priority_col].replace("", None).dropna().value_counts().reset_index()
         pc.columns = ["Приоритет", "Кол-во"]
-        fig_p = px.pie(pc, names="Приоритет", values="Кол-во", color="Приоритет",
-                       color_discrete_map=PRIORITY_COLORS, hole=0.4)
-        fig_p.update_layout(margin=dict(t=0, b=0, l=0, r=0))
-        st.plotly_chart(fig_p, use_container_width=True)
+        prio_order = ["Низкий", "Средний", "Высокий"]
+        pc["_order"] = pc["Приоритет"].map({s: i for i, s in enumerate(prio_order)}).fillna(99)
+        pc = pc.sort_values("_order", ascending=True).drop(columns=["_order"])
+        fig_p = px.bar(pc, x="Кол-во", y="Приоритет", orientation="h",
+                       color="Приоритет", color_discrete_map=PRIORITY_COLORS,
+                       text="Кол-во")
+        fig_p.update_traces(textposition="outside", cliponaxis=False,
+                            textfont_size=13, marker_line_width=0)
+        fig_p.update_layout(margin=dict(t=0, b=0, l=0, r=50),
+                            showlegend=False, height=max(160, len(pc) * 44),
+                            yaxis_title=None, xaxis_title=None,
+                            yaxis=dict(categoryorder="array",
+                                       categoryarray=["Низкий", "Средний", "Высокий"]),
+                            xaxis=dict(showgrid=False, showticklabels=False,
+                                       range=[0, pc["Кол-во"].max() * 1.3]))
+        ev_prio = st.plotly_chart(fig_p, use_container_width=True,
+                                  on_select="rerun", key="bar_priority",
+                                  selection_mode="points")
+        pts_p = (ev_prio.selection.points if ev_prio and ev_prio.selection else [])
+        if pts_p:
+            clicked_prio = pts_p[0].get("y", "")
+            if clicked_prio and priority_col:
+                subset_p = prj[prj[priority_col] == clicked_prio]
+                cols_show_p = [c for c in [code_col, name_col, status_col] if c]
+                st.caption(f"Приоритет **{clicked_prio}** — {len(subset_p)} проект(ов):")
+                st.dataframe(subset_p[cols_show_p], use_container_width=True, hide_index=True)
 
-st.subheader("Бюджет vs Факт оплат")
+st.subheader("Исполнение плана оплат, %")
 if not fin_df.empty:
-    fin_melted = fin_df.melt(
-        id_vars="Код", value_vars=["Бюджет", "План_оплат", "Факт_оплат"],
-        var_name="Тип", value_name="Сумма"
-    )
-    fin_melted["Тип"] = fin_melted["Тип"].map(
-        {"Бюджет": "Бюджет", "План_оплат": "План", "Факт_оплат": "Факт"}
-    )
     def _fmt_rub(v: float) -> str:
-        if v <= 0:         return ""
+        if v <= 0:         return "—"
         if v >= 1_000_000: return f"{v/1_000_000:.1f} млн"
         if v >= 1_000:     return f"{v/1_000:.0f} тыс"
         return f"{v:.0f}"
 
-    fin_melted["Подпись"] = fin_melted["Сумма"].apply(_fmt_rub)
+    fa = fin_df[fin_df["План_оплат"] > 0].copy()
+    if not fa.empty:
+        fa["Исполнение_%"] = (fa["Факт_оплат"] / fa["План_оплат"] * 100).round(1)
+        fa["Цвет"] = fa["Исполнение_%"].apply(lambda x: "#E74C3C" if x > 100 else "#2ECC71")
+        fa["Подпись"] = fa.apply(
+            lambda r: f"{r['Исполнение_%']:.0f}%  ({_fmt_rub(r['Факт_оплат'])} из {_fmt_rub(r['План_оплат'])})", axis=1
+        )
+        fa = fa.sort_values("Исполнение_%", ascending=True)
 
-    fig2 = px.bar(
-        fin_melted, x="Сумма", y="Код", color="Тип", orientation="h",
-        color_discrete_map={"Бюджет": "#3498DB", "План": "#9B59B6", "Факт": "#2ECC71"},
-        barmode="group", text="Подпись",
-    )
-    fig2.update_traces(textposition="outside", cliponaxis=False)
-    fig2.update_layout(margin=dict(t=0, b=0, l=0, r=100),
-                       yaxis={"categoryorder": "total ascending"}, height=400)
-    st.plotly_chart(fig2, use_container_width=True)
+        fig_a = px.bar(
+            fa, x="Исполнение_%", y="Код", orientation="h",
+            color="Цвет", color_discrete_map="identity",
+            text="Подпись",
+        )
+        fig_a.add_vline(x=100, line_dash="dash", line_color="#7f8c8d", line_width=1.5,
+                        annotation_text="100%", annotation_position="top right",
+                        annotation_font_color="#7f8c8d")
+        fig_a.update_traces(textposition="outside", cliponaxis=False, textfont_size=12)
+        fig_a.update_layout(
+            margin=dict(t=10, b=30, l=0, r=10),
+            showlegend=False,
+            height=max(250, len(fa) * 44),
+            yaxis_title=None,
+            xaxis=dict(
+                title="% от плана", ticksuffix="%",
+                range=[0, 110],
+            ),
+        )
+        st.plotly_chart(fig_a, use_container_width=True)
 
 st.divider()
 
