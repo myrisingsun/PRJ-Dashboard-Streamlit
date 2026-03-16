@@ -30,13 +30,33 @@ st.markdown("""
              border:1px solid #e0e4e8; border-radius:8px; }
 
 /* Таблица */
-.team-table { border-collapse:collapse; width:100%; font-size:0.80em; background:#fff; }
+.team-table { border-collapse:collapse; font-size:0.80em; background:#fff; }
 .team-table thead th { background:#2C3E50; color:#ECF0F1; font-weight:700;
-                       padding:6px 8px; text-align:center; border:1px solid #1A252F;
-                       white-space:nowrap; }
-.team-table td { padding:4px 6px; border:1px solid #E8E8E8; text-align:center; }
+                       padding:4px 3px; text-align:center; border:1px solid #1A252F; }
+/* Заголовок первой колонки (Проект) */
+.team-table thead th.th-prj { text-align:left; padding:6px 8px;
+                               white-space:nowrap; min-width:140px; }
+/* Заголовки сотрудников — вертикальный текст */
+.team-table thead th.th-emp {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    transform: rotate(180deg);
+    height: 90px;
+    width: 30px;
+    min-width: 30px;
+    max-width: 30px;
+    padding: 6px 4px;
+    vertical-align: bottom;
+    white-space: nowrap;
+    font-size: 0.78em;
+}
+.team-table td { padding:4px 3px; border:1px solid #E8E8E8;
+                 text-align:center; width:30px; min-width:30px; }
+/* Колонка проекта */
 .team-table td.td-code { text-align:left; font-size:0.78em; font-weight:700;
-                         color:#95a5a6; text-transform:uppercase; white-space:nowrap; }
+                         color:#95a5a6; text-transform:uppercase;
+                         max-width:180px; min-width:140px;
+                         padding:4px 8px; }
 .team-table td.td-code a { color:#2980b9; text-decoration:none; }
 .team-table td.td-code a:hover { text-decoration:underline; }
 .team-table tr:nth-child(even) td { background:#F8FAFB; }
@@ -48,9 +68,11 @@ st.markdown("""
                                  border:1px solid #1A252F; }
 .team-table tr.summary-row td:first-child { text-align:left; }
 
-/* Название проекта под кодом в матрице */
-.td-name { font-size:0.82em; color:#7f8c8d; font-weight:400;
-           text-transform:none; margin-top:2px; white-space:normal; }
+/* Название проекта под кодом — обрезать длинные */
+.td-name { font-size:0.80em; color:#7f8c8d; font-weight:400;
+           text-transform:none; margin-top:2px;
+           white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+           max-width:160px; }
 
 /* Карточка команды проекта */
 .prj-team-wrap { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
@@ -120,8 +142,8 @@ def build_role_badge(role_val: str) -> str:
 
 def build_team_matrix(df: pd.DataFrame, code_col: str, emp_cols: list) -> str:
     # Header
-    header_cells = '<th>Проект</th>' + "".join(
-        f"<th>{emp}</th>" for emp in emp_cols
+    header_cells = '<th class="th-prj">Проект</th>' + "".join(
+        f'<th class="th-emp">{emp}</th>' for emp in emp_cols
     )
     # Body rows
     body_rows = []

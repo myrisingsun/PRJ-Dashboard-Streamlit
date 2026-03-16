@@ -7,7 +7,7 @@ import pandas as pd
 st.set_page_config(page_title="Debug", page_icon="🔍", layout="wide")
 
 from auth import render_sidebar_user, require_auth
-from data.loader import _load_raw, load_prj_status, load_prj_team, _find_col
+from data.loader import _load_raw, load_prj_status, load_prj_team, load_prj_money, _find_col
 
 authenticator = require_auth()
 render_sidebar_user(authenticator)
@@ -128,6 +128,68 @@ if sheet == "04.PRJ_TEAM":
         else:
             st.warning("Нет ни одного назначения с ролью A/S/БА — проверьте значения в ячейках.")
 
+    st.divider()
+
+# ── Finance monthly columns diagnostic (for 05.PRJ_MONEY_2026) ───────────────
+if sheet == "05.PRJ_MONEY_2026":
+    st.divider()
+    st.subheader("Диагностика: помесячные данные (load_prj_money)")
+    with st.spinner("Парсинг..."):
+        money_df = load_prj_money()
+    if money_df.empty:
+        st.warning("load_prj_money() вернул пустой DataFrame.")
+    else:
+        MONTH_NAMES = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн",
+                       "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
+        plan_cols = [f"{m}_план" for m in MONTH_NAMES]
+        fact_cols = [f"{m}_факт" for m in MONTH_NAMES]
+
+        st.caption(f"Строк в money_df: {len(money_df)}  |  is_итого строк: {money_df['is_итого'].sum()}")
+
+        # Show totals per month to detect if data is populated
+        non_total = money_df[~money_df["is_итого"]]
+        plan_sums = {c: non_total[c].sum() for c in plan_cols if c in non_total.columns}
+        fact_sums = {c: non_total[c].sum() for c in fact_cols if c in non_total.columns}
+
+        st.markdown("**Суммы по помесячным колонкам (не-Итого строки):**")
+        check_df = pd.DataFrame({
+            "Месяц":    MONTH_NAMES,
+            "plan_sum": [plan_sums.get(c, 0) for c in plan_cols],
+            "fact_sum": [fact_sums.get(c, 0) for c in fact_cols],
+        })
+        st.dataframe(check_df, use_container_width=True, hide_index=True)
+
+        total_plan_sum = sum(plan_sums.values())
+        total_fact_sum = sum(fact_sums.values())
+        if total_plan_sum == 0 and total_fact_sum == 0:
+            st.error("⚠️ Все помесячные колонки = 0. Возможно, неверные индексы столбцов в листе.")
+            st.info("Проверьте реальные индексы в секции ниже: выберите строку «Итого» проекта и смотрите, "
+                    "в каких столбцах есть числа.")
+        else:
+            st.success(f"✅ Данные есть: план={total_plan_sum:,.0f}, факт={total_fact_sum:,.0f}")
+
+        # Show raw first итого row to inspect column positions
+        st.markdown("**Первая строка «Итого» из raw-данных (индексы 0-based):**")
+        raw_money = _load_raw("05.PRJ_MONEY_2026")
+        import re
+        _CODE_RE = re.compile(r"^[A-Z]{2,6}\.\d{4}$")
+        current = ""
+        found_row = None
+        for r in raw_money:
+            if not r:
+                continue
+            c0 = r[0].strip() if r else ""
+            if c0 and _CODE_RE.match(c0):
+                current = c0
+            c1 = r[1].strip() if len(r) > 1 else ""
+            if current and "итого" in c1.lower():
+                found_row = r
+                break
+        if found_row:
+            raw_view = {str(i): v for i, v in enumerate(found_row) if v.strip()}
+            st.json(raw_view)
+        else:
+            st.info("Строка «Итого» не найдена в raw-данных.")
     st.divider()
 
 with st.spinner("Загрузка..."):

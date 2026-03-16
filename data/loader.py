@@ -371,6 +371,7 @@ def get_finance_per_project() -> pd.DataFrame:
 
         rows.append({
             "Код":         c0,
+            # col 5 (F) = «Бюджет 2026» — итоговый бюджет проекта на год
             "Бюджет":      _parse_rub(row[5]  if len(row) > 5  else ""),
             "План_оплат":  _parse_rub(row[32] if len(row) > 32 else ""),
             "Факт_оплат":  _parse_rub(row[33] if len(row) > 33 else ""),

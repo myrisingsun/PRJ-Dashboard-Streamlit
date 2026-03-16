@@ -1,0 +1,11 @@
+version: "3.9"
+services:
+  dashboard:
+    image: myrisingsun/prj-dashboard-streamlit:latest
+    restart: always
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro

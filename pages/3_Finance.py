@@ -203,39 +203,6 @@ def make_monthly_bars_from(plan: list, fact: list, title: str) -> go.Figure:
     return fig
 
 
-def make_cumulative_from(plan: list, fact: list, title: str) -> go.Figure:
-    """Line chart: cumulative plan vs fact from pre-computed lists (тыс. ₽)."""
-    cum_plan = list(pd.Series(plan, dtype=float).cumsum())
-    cum_fact = list(pd.Series(fact, dtype=float).cumsum())
-
-    def _t(vals):
-        return [f"{v:.0f}" if v > 0 else "" for v in vals]
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        name="Накоп. план", x=MONTH_NAMES, y=cum_plan,
-        mode="lines+markers+text",
-        line=dict(color="#3498DB", width=2, dash="dot"),
-        marker=dict(size=5),
-        text=_t(cum_plan), textposition="top center",
-        textfont=dict(size=10, color="#3498DB"),
-    ))
-    fig.add_trace(go.Scatter(
-        name="Накоп. факт", x=MONTH_NAMES, y=cum_fact,
-        mode="lines+markers+text",
-        line=dict(color="#2ECC71", width=2),
-        marker=dict(size=5),
-        fill="tozeroy", fillcolor="rgba(46,204,113,0.08)",
-        text=_t(cum_fact), textposition="bottom center",
-        textfont=dict(size=10, color="#27AE60"),
-    ))
-    fig.update_layout(
-        **_CHART_LAYOUT,
-        height=300,
-        yaxis_title="тыс. ₽",
-        title=title,
-    )
-    return fig
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -286,11 +253,6 @@ st.plotly_chart(
     use_container_width=True,
 )
 
-# 4. Cumulative lines
-st.plotly_chart(
-    make_cumulative_from(plan_agg, fact_agg, "Накопительное исполнение, тыс. ₽"),
-    use_container_width=True,
-)
 
 st.divider()
 
@@ -301,10 +263,10 @@ st.subheader("Детализация по статьям")
 
 
 def _fmt_k(v) -> str:
-    """Format a number in thousands with 1 decimal. Returns '' for zero."""
+    """Format a number in thousands, no decimals. Returns '' for zero."""
     try:
         f = float(v)
-        return f"{f / 1000:.1f}" if f != 0 else ""
+        return f"{f / 1000:.0f}" if f != 0 else ""
     except (ValueError, TypeError):
         return ""
 
