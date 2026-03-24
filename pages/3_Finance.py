@@ -9,9 +9,7 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="Finance", page_icon="💰", layout="wide")
 
 from auth import render_sidebar_user, require_auth, require_role
-from data.loader import (
-    load_prj_money, load_prj_list, get_finance_per_project, _find_col,
-)
+from data.loader import load_prj_money, load_prj_list, _find_col
 
 authenticator = require_auth()
 render_sidebar_user(authenticator)
@@ -24,9 +22,8 @@ MONTH_NAMES = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн",
 
 # ── Load data ──────────────────────────────────────────────────────────────────
 with st.spinner("Загрузка финансовых данных..."):
-    money      = load_prj_money()
-    prj_list   = load_prj_list()
-    fin_totals = get_finance_per_project()
+    money    = load_prj_money()
+    prj_list = load_prj_list()
 
 # ── Project metadata ───────────────────────────────────────────────────────────
 code_col = _find_col(prj_list, ["Код проекта", "Код", "CODE"]) if not prj_list.empty else None
@@ -80,20 +77,22 @@ if money.empty:
     st.error("Не удалось загрузить данные из листа 05.PRJ_MONEY_2026.")
     st.stop()
 
-# ── KPI cards ──────────────────────────────────────────────────────────────────
+# ── Filtered data (single source of truth for KPIs and tables) ─────────────────
 sel_set = set(selected)
 
-if not fin_totals.empty and sel_set:
-    ft = fin_totals[fin_totals["Код"].isin(sel_set)]
-else:
-    ft = pd.DataFrame()
+ordered_codes  = [c for c in prj_order if c in sel_set] + \
+                 [c for c in selected  if c not in set(prj_order)]
+filtered_money = money[money["Код проекта"].isin(sel_set)]
+
+# KPIs come from "Итого" rows of filtered_money — same data as the tables below
+ft = filtered_money[filtered_money["is_итого"]]
 
 
 def _sum(df: pd.DataFrame, col: str) -> float:
     return float(df[col].sum()) if not df.empty and col in df.columns else 0.0
 
 
-budget   = _sum(ft, "Бюджет")
+budget   = _sum(ft, "Бюджет_2026")
 plan_pay = _sum(ft, "План_оплат")
 fact_pay = _sum(ft, "Факт_оплат")
 dev      = _sum(ft, "Отклонение")
@@ -117,11 +116,6 @@ if not selected:
     st.info("Выберите хотя бы один проект в боковой панели.")
     st.stop()
 
-# ── Render order ───────────────────────────────────────────────────────────────
-ordered_codes = [c for c in prj_order if c in sel_set] + \
-                [c for c in selected  if c not in set(prj_order)]
-filtered_money = money[money["Код проекта"].isin(sel_set)]
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HELPERS: chart builders
@@ -137,23 +131,36 @@ _CHART_LAYOUT = dict(
 )
 
 
-def make_portfolio_chart(fin_df: pd.DataFrame) -> go.Figure | None:
-    """Horizontal grouped bar: Бюджет / План / Факт by project."""
-    df = fin_df[fin_df["Код"].isin(sel_set)].copy()
+def make_portfolio_chart() -> go.Figure | None:
+    """Horizontal grouped bar: Бюджет / План / Факт by project (from итого rows)."""
+    df = (
+        filtered_money[filtered_money["is_итого"]]
+        .groupby("Код проекта")[["Бюджет_2026", "План_оплат", "Факт_оплат"]]
+        .sum()
+        .reset_index()
+    )
+    # preserve display order
+    code_order = {c: i for i, c in enumerate(ordered_codes)}
+    df["_ord"] = df["Код проекта"].map(code_order).fillna(999)
+    df = df.sort_values("_ord").drop(columns="_ord")
+
     if df.empty:
         return None
+
     labels = [
-        f"{r['Код']} — {code_to_name[r['Код']]}" if r["Код"] in code_to_name else r["Код"]
+        f"{r['Код проекта']} — {code_to_name[r['Код проекта']]}"
+        if r["Код проекта"] in code_to_name else r["Код проекта"]
         for _, r in df.iterrows()
     ]
+
     def _m(vals):
         return [f"{v:.1f}" if v > 0 else "" for v in vals]
 
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        name="Бюджет", y=labels, x=df["Бюджет"] / 1e6,
+        name="Бюджет", y=labels, x=df["Бюджет_2026"] / 1e6,
         orientation="h", marker_color="#3498DB", opacity=0.55,
-        text=_m(df["Бюджет"] / 1e6), textposition="outside", cliponaxis=False,
+        text=_m(df["Бюджет_2026"] / 1e6), textposition="outside", cliponaxis=False,
     ))
     fig.add_trace(go.Bar(
         name="План оплат", y=labels, x=df["План_оплат"] / 1e6,
@@ -172,7 +179,7 @@ def make_portfolio_chart(fin_df: pd.DataFrame) -> go.Figure | None:
         xaxis_title="млн ₽",
         title="Бюджет vs Факт по проектам",
     )
-    fig.update_layout(margin_r=80)   # extra room for outside text labels
+    fig.update_layout(margin_r=80)
     return fig
 
 
@@ -214,10 +221,9 @@ st.subheader("Аналитика")
 agg_df = filtered_money[~filtered_money["is_итого"]]  # non-total rows, all projects
 
 # 1. Portfolio bar
-if not fin_totals.empty:
-    port_fig = make_portfolio_chart(fin_totals)
-    if port_fig:
-        st.plotly_chart(port_fig, use_container_width=True)
+port_fig = make_portfolio_chart()
+if port_fig:
+    st.plotly_chart(port_fig, use_container_width=True)
 
 # 2. Budget donut by project
 budg_by_prj = (

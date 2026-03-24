@@ -418,7 +418,9 @@ def load_prj_money() -> pd.DataFrame:
     rows = []
     current_code = ""
     for raw_row in data[3:]:
+        # Completely empty row = block separator → reset project scope
         if not raw_row or not any(c.strip() for c in raw_row):
+            current_code = ""
             continue
         # Pad to at least 36 columns so index access is safe
         row = raw_row + [""] * max(0, 36 - len(raw_row))
@@ -426,12 +428,18 @@ def load_prj_money() -> pd.DataFrame:
         c0 = row[0].strip()
         c1 = row[1].strip()
 
-        # Forward-fill project code
-        if c0 and _PRJ_CODE_RE.match(c0):
-            current_code = c0
+        # Forward-fill project code.
+        # If col 0 is non-empty: update current_code only when it matches the
+        # project-code pattern; reset to "" for any other non-empty value
+        # (e.g. separator rows or rows marked with a non-project index by the user).
+        if c0:
+            if _PRJ_CODE_RE.match(c0):
+                current_code = c0
+            else:
+                current_code = ""
 
         if not current_code:
-            continue  # skip header rows before the first project block
+            continue  # skip rows outside a project block
 
         if not c1:
             continue  # skip rows with no статья name
