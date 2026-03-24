@@ -6,11 +6,12 @@ import plotly.express as px
 
 st.set_page_config(page_title="Operations", page_icon="🔧", layout="wide")
 
-from auth import render_sidebar_user, require_auth
+from auth import render_sidebar_user, require_auth, require_role
 from data.loader import STATUS_COLORS, STATUS_EMOJI, load_oper_list, _find_col
 
 authenticator = require_auth()
 render_sidebar_user(authenticator)
+require_role(["admin"])
 
 st.title("🔧 Внепроектная и операционная работа")
 

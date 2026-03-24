@@ -21,16 +21,28 @@ render_sidebar_user(authenticator)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Навигация**")
-st.sidebar.markdown(
-    """
-    - 📋 **Index** — портфель проектов
-    - 📅 **Gantt** — статус и Гант
-    - 💰 **Finance** — финансы
-    - 👥 **Team** — команды и премии
-    - 🔧 **Operations** — внепроектная работа
-    """,
-    unsafe_allow_html=False,
-)
+from auth import get_current_role
+_role = get_current_role()
+if _role == "admin":
+    st.sidebar.markdown(
+        """
+        - 📋 **Index** — портфель проектов
+        - 📅 **Gantt** — статус и Гант
+        - 💰 **Finance** — финансы
+        - 👥 **Team** — команды
+        - 🔧 **Operations** — внепроектная работа
+        - 🏆 **Motivation** — расчёт премий
+        """,
+        unsafe_allow_html=False,
+    )
+else:
+    st.sidebar.markdown(
+        """
+        - 📅 **Gantt** — статус и Гант
+        - 👥 **Team** — команды
+        """,
+        unsafe_allow_html=False,
+    )
 
 # ── Home content ─────────────────────────────────────────────────────────────
 st.title("📊 AFI Project Portfolio Dashboard")
@@ -45,8 +57,9 @@ st.markdown(
     | 📋 Index | Сводная таблица всех проектов, KPI-карточки |
     | 📅 Gantt | Диаграмма Ганта и ключевые точки |
     | 💰 Finance | Бюджеты, план/факт оплат 2026 |
-    | 👥 Team | Матрица команд и расчёт премий |
+    | 👥 Team | Матрица участия команд в проектах |
     | 🔧 Operations | Внепроектная и операционная работа |
+    | 🏆 Motivation | Расчёт и распределение проектной премии |
     """,
 )
 

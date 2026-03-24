@@ -49,10 +49,27 @@ def require_auth() -> stauth.Authenticate:
     return authenticator
 
 
+def get_current_role() -> str:
+    """Return the role of the currently authenticated user ('admin' or 'viewer')."""
+    config = _load_config()
+    username = st.session_state.get("username", "")
+    return config.get("roles", {}).get(username, "viewer")
+
+
+def require_role(allowed_roles: list[str]) -> None:
+    """Stop page rendering if the current user's role is not in allowed_roles."""
+    role = get_current_role()
+    if role not in allowed_roles:
+        st.error("🚫 Нет доступа к этому разделу.")
+        st.stop()
+
+
 def render_sidebar_user(authenticator: stauth.Authenticate) -> None:
     """Render user info and logout button in the sidebar."""
     name = st.session_state.get("name", "")
-    st.sidebar.markdown(f"**👤 {name}**")
+    role = get_current_role()
+    role_label = " *(просмотр)*" if role == "viewer" else ""
+    st.sidebar.markdown(f"**👤 {name}**{role_label}")
     authenticator.logout("Выйти", location="sidebar")
     st.sidebar.divider()
     if st.sidebar.button("🔄 Обновить данные", use_container_width=True):

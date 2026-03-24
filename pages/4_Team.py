@@ -13,7 +13,7 @@ from data.loader import load_prj_team, _find_col
 authenticator = require_auth()
 render_sidebar_user(authenticator)
 
-st.title("👥 Команды и распределение премий")
+st.title("👥 Команды проектов")
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -152,7 +152,7 @@ def build_team_matrix(df: pd.DataFrame, code_col: str, emp_cols: list) -> str:
         name_val = str(row.get(name_col, "")).strip() if name_col else ""
         name_part = f'<div class="td-name">{name_val}</div>' if name_val else ""
         code_td = (
-            f'<td class="td-code"><a href="/Project?project={code_val}">{code_val}</a>{name_part}</td>'
+            f'<td class="td-code"><a href="/Projects?project={code_val}">{code_val}</a>{name_part}</td>'
             if code_val else '<td class="td-code"></td>'
         )
         role_cells = "".join(
@@ -311,105 +311,3 @@ if workload_rows:
     fig_wl.update_xaxes(dtick=1, gridcolor="#E8E8E8", showgrid=True)
     st.plotly_chart(fig_wl, use_container_width=True)
 
-st.divider()
-
-# ── Калькулятор премий ────────────────────────────────────────────────────────
-st.subheader("Распределение премии")
-
-bonus_pool = st.number_input(
-    "Общий фонд премии (₽)",
-    min_value=0,
-    value=1_000_000,
-    step=10_000,
-    format="%d",
-)
-
-method = st.radio(
-    "Метод распределения",
-    options=["Поровну по участникам", "С весом по роли (A=3x, БА=2x, S=1x)", "С весом по количеству проектов"],
-)
-
-ROLE_WEIGHTS = {"A": 3, "БА": 2, "S": 1}
-
-
-def fmt_bonus_label(v: float) -> str:
-    if v >= 1_000_000:
-        return f"{v / 1_000_000:.2f} млн"
-    if v >= 1_000:
-        return f"{v / 1_000:.1f} тыс"
-    return f"{v:.0f} ₽"
-
-
-if st.button("Рассчитать"):
-    # Build participation table: employee → list of roles
-    rows = []
-    for emp in emp_cols:
-        col_data = team[emp].fillna("").astype(str).str.strip()
-        roles = col_data[col_data.isin(["A", "S", "БА"])].tolist()
-        if roles:
-            rows.append({
-                "Сотрудник": emp,
-                "Количество проектов": len(roles),
-                "Роли": ", ".join(roles),
-                "Макс. роль": "A" if "A" in roles else ("БА" if "БА" in roles else "S"),
-            })
-
-    if not rows:
-        st.warning("Нет данных об участии сотрудников.")
-    else:
-        result_df = pd.DataFrame(rows)
-
-        if method == "Поровну по участникам":
-            per_person = bonus_pool / len(result_df)
-            result_df["Премия (₽)"] = per_person
-
-        elif "роли" in method:
-            result_df["Вес"] = result_df["Макс. роль"].map(ROLE_WEIGHTS).fillna(1)
-            total_weight = result_df["Вес"].sum()
-            result_df["Премия (₽)"] = result_df["Вес"] / total_weight * bonus_pool
-
-        else:  # by project count
-            total_proj = result_df["Количество проектов"].sum()
-            result_df["Премия (₽)"] = result_df["Количество проектов"] / total_proj * bonus_pool
-
-        result_df["Премия (₽)"] = result_df["Премия (₽)"].round(2)
-
-        show_cols = ["Сотрудник", "Количество проектов", "Роли", "Премия (₽)"]
-        st.dataframe(result_df[show_cols], use_container_width=True, hide_index=True)
-
-        # Total check
-        st.metric("Итого распределено", f"{result_df['Премия (₽)'].sum():,.2f} ₽")
-
-        # Download
-        csv = result_df[show_cols].to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
-        st.download_button(
-            label="Скачать CSV",
-            data=csv,
-            file_name="bonus_distribution.csv",
-            mime="text/csv",
-        )
-
-        # Viz — go.Bar with text labels
-        sorted_df = result_df.sort_values("Премия (₽)", ascending=True)
-        bar_colors = sorted_df["Макс. роль"].map(ROLE_COLORS).fillna("#95A5A6").tolist()
-
-        fig = go.Figure(go.Bar(
-            y=sorted_df["Сотрудник"],
-            x=sorted_df["Премия (₽)"],
-            orientation="h",
-            marker_color=bar_colors,
-            text=sorted_df["Премия (₽)"].apply(fmt_bonus_label),
-            textposition="outside",
-            cliponaxis=False,
-        ))
-        fig.update_layout(
-            height=max(300, len(sorted_df) * 35 + 80),
-            margin=dict(l=0, r=130, t=10, b=0),
-            plot_bgcolor="#ffffff",
-            paper_bgcolor="rgba(0,0,0,0)",
-            xaxis_title="₽",
-            yaxis_title="",
-            showlegend=False,
-        )
-        fig.update_xaxes(gridcolor="#E8E8E8", showgrid=True)
-        st.plotly_chart(fig, use_container_width=True)

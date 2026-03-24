@@ -6,11 +6,12 @@ import pandas as pd
 
 st.set_page_config(page_title="Debug", page_icon="🔍", layout="wide")
 
-from auth import render_sidebar_user, require_auth
+from auth import render_sidebar_user, require_auth, require_role
 from data.loader import _load_raw, load_prj_status, load_prj_team, load_prj_money, _find_col
 
 authenticator = require_auth()
 render_sidebar_user(authenticator)
+require_role(["admin"])
 
 st.title("🔍 Диагностика сырых данных")
 

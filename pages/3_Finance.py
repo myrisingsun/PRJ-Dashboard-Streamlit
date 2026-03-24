@@ -8,13 +8,14 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Finance", page_icon="💰", layout="wide")
 
-from auth import render_sidebar_user, require_auth
+from auth import render_sidebar_user, require_auth, require_role
 from data.loader import (
     load_prj_money, load_prj_list, get_finance_per_project, _find_col,
 )
 
 authenticator = require_auth()
 render_sidebar_user(authenticator)
+require_role(["admin"])
 
 st.title("💰 Финансы 2026")
 

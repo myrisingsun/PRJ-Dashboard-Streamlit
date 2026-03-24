@@ -8,9 +8,9 @@ import plotly.graph_objects as go
 import pandas as pd
 from typing import Optional
 
-st.set_page_config(page_title="Project Detail", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="Projects", page_icon="🔍", layout="wide")
 
-from auth import render_sidebar_user, require_auth
+from auth import render_sidebar_user, require_auth, require_role
 from data.loader import (
     STATUS_COLORS, STATUS_EMOJI,
     load_prj_list, load_prj_status, load_prj_money, load_prj_team,
@@ -20,6 +20,7 @@ from data.loader import (
 
 authenticator = require_auth()
 render_sidebar_user(authenticator)
+require_role(["admin"])
 
 MONTH_NAMES = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн",
                "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]

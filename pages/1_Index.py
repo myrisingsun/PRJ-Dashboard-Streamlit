@@ -8,7 +8,7 @@ import pandas as pd
 
 st.set_page_config(page_title="Index — Portfolio", page_icon="📋", layout="wide")
 
-from auth import render_sidebar_user, require_auth
+from auth import render_sidebar_user, require_auth, require_role
 from data.loader import (
     STATUS_COLORS, STATUS_EMOJI,
     load_prj_list, get_finance_per_project, get_pm_per_project, _find_col,
@@ -16,6 +16,7 @@ from data.loader import (
 
 authenticator = require_auth()
 render_sidebar_user(authenticator)
+require_role(["admin"])
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -480,7 +481,7 @@ def project_card(row: pd.Series) -> str:
       <span class="prj-badge" style="background:{color}">{emoji} {status_label}</span>
     </div>
   </div>
-  <a class="prj-name-link" href="/Project?project={code}"><div class="prj-name">{name}</div></a>
+  <a class="prj-name-link" href="/Projects?project={code}"><div class="prj-name">{name}</div></a>
   {meta_html}
   {desc_html}
   {finance_html}
